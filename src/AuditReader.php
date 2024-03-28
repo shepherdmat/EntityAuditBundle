@@ -214,7 +214,7 @@ class AuditReader
                 $columnName = $idKeys[0];
             } elseif (isset($classMetadata->fieldMappings[$idField])) {
                 $columnName = $classMetadata->fieldMappings[$idField]['columnName'];
-            } elseif (isset($classMetadata->associationMappings[$idField]['joinColumns'])) {
+            } elseif (!$this->config->areAssociationsDisabled() && isset($classMetadata->associationMappings[$idField]['joinColumns'])) {
                 $columnName = $classMetadata->associationMappings[$idField]['joinColumns'][0]['name'];
             } else {
                 throw new \RuntimeException('column name not found  for'.$idField);
@@ -249,23 +249,25 @@ class AuditReader
             $columnMap[$field] = $this->getSQLResultCasing($this->platform, $columnName);
         }
 
-        foreach ($classMetadata->associationMappings as $assoc) {
-            if (
-                ($assoc['type'] & ClassMetadata::TO_ONE) === 0
-                || false === $assoc['isOwningSide']
-                || !isset($assoc['joinColumnFieldNames'])
-            ) {
-                continue;
-            }
+        if (!$this->getConfiguration()->areAssociationsDisabled()) {
+            foreach ($classMetadata->associationMappings as $assoc) {
+                if (
+                    ($assoc['type'] & ClassMetadata::TO_ONE) === 0
+                    || false === $assoc['isOwningSide']
+                    || !isset($assoc['joinColumnFieldNames'])
+                ) {
+                    continue;
+                }
 
-            foreach ($assoc['joinColumnFieldNames'] as $sourceCol) {
-                $tableAlias = $classMetadata->isInheritanceTypeJoined()
+                foreach ($assoc['joinColumnFieldNames'] as $sourceCol) {
+                    $tableAlias = $classMetadata->isInheritanceTypeJoined()
                     && $classMetadata->isInheritedAssociation($assoc['fieldName'])
                     && !$classMetadata->isIdentifier($assoc['fieldName'])
                         ? 're' // root entity
                         : 'e';
-                $columnList[] = $tableAlias.'.'.$sourceCol;
-                $columnMap[$sourceCol] = $this->getSQLResultCasing($this->platform, $sourceCol);
+                    $columnList[] = $tableAlias.'.'.$sourceCol;
+                    $columnMap[$sourceCol] = $this->getSQLResultCasing($this->platform, $sourceCol);
+                }
             }
         }
 
@@ -423,15 +425,17 @@ class AuditReader
                 $columnMap[$field] = $this->getSQLResultCasing($this->platform, $columnName);
             }
 
-            foreach ($classMetadata->associationMappings as $assoc) {
-                if (
-                    ($assoc['type'] & ClassMetadata::TO_ONE) > 0
-                    && true === $assoc['isOwningSide']
-                    && isset($assoc['targetToSourceKeyColumns'])
-                ) {
-                    foreach ($assoc['targetToSourceKeyColumns'] as $sourceCol) {
-                        $columnList .= ', '.$sourceCol;
-                        $columnMap[$sourceCol] = $this->getSQLResultCasing($this->platform, $sourceCol);
+            if (!$this->config->areAssociationsDisabled()) {
+                foreach ($classMetadata->associationMappings as $assoc) {
+                    if (
+                        ($assoc['type'] & ClassMetadata::TO_ONE) > 0
+                        && true === $assoc['isOwningSide']
+                        && isset($assoc['targetToSourceKeyColumns'])
+                    ) {
+                        foreach ($assoc['targetToSourceKeyColumns'] as $sourceCol) {
+                            $columnList .= ', '.$sourceCol;
+                            $columnMap[$sourceCol] = $this->getSQLResultCasing($this->platform, $sourceCol);
+                        }
                     }
                 }
             }
@@ -544,7 +548,7 @@ class AuditReader
                     $whereSQL .= ' AND ';
                 }
                 $whereSQL .= 'e.'.$classMetadata->fieldMappings[$idField]['columnName'].' = ?';
-            } elseif (isset($classMetadata->associationMappings[$idField]['joinColumns'])) {
+            } elseif (!$this->config->areAssociationsDisabled() && isset($classMetadata->associationMappings[$idField]['joinColumns'])) {
                 if ('' !== $whereSQL) {
                     $whereSQL .= ' AND ';
                 }
@@ -606,7 +610,7 @@ class AuditReader
                     $whereSQL .= ' AND ';
                 }
                 $whereSQL .= 'e.'.$classMetadata->fieldMappings[$idField]['columnName'].' = ?';
-            } elseif (isset($classMetadata->associationMappings[$idField]['joinColumns'])) {
+            } elseif (!$this->config->areAssociationsDisabled() && isset($classMetadata->associationMappings[$idField]['joinColumns'])) {
                 if ('' !== $whereSQL) {
                     $whereSQL .= ' AND ';
                 }
@@ -716,14 +720,11 @@ class AuditReader
             $id = [$classMetadata->identifier[0] => $id];
         }
 
-        /** @phpstan-var array<literal-string> $whereId */
         $whereId = [];
         foreach ($classMetadata->identifier as $idField) {
             if (isset($classMetadata->fieldMappings[$idField])) {
-                /** @phpstan-var literal-string $columnName */
                 $columnName = $classMetadata->fieldMappings[$idField]['columnName'];
-            } elseif (isset($classMetadata->associationMappings[$idField]['joinColumns'])) {
-                /** @phpstan-var literal-string $columnName */
+            } elseif (!$this->config->areAssociationsDisabled() && isset($classMetadata->associationMappings[$idField]['joinColumns'])) {
                 $columnName = $classMetadata->associationMappings[$idField]['joinColumns'][0]['name'];
             } else {
                 continue;
@@ -738,40 +739,39 @@ class AuditReader
 
         foreach ($classMetadata->fieldNames as $columnName => $field) {
             $type = Type::getType($classMetadata->fieldMappings[$field]['type']);
-            /** @phpstan-var literal-string $sqlExpr */
-            $sqlExpr = $type->convertToPHPValueSQL(
+            $columnList[] = $type->convertToPHPValueSQL(
                 $this->quoteStrategy->getColumnName($field, $classMetadata, $this->platform),
                 $this->platform
-            );
-            /** @phpstan-var literal-string $quotedField */
-            $quotedField = $this->platform->quoteSingleIdentifier($field);
-            $columnList[] = $sqlExpr.' AS '.$quotedField;
+            ).' AS '.$this->platform->quoteSingleIdentifier($field);
             $columnMap[$field] = $this->getSQLResultCasing($this->platform, $columnName);
         }
 
-        foreach ($classMetadata->associationMappings as $assoc) {
-            if (
-                ($assoc['type'] & ClassMetadata::TO_ONE) === 0
-                || false === $assoc['isOwningSide']
-                || !isset($assoc['targetToSourceKeyColumns'])
-            ) {
-                continue;
-            }
+        if (!$this->config->areAssociationsDisabled()) {
+            foreach ($classMetadata->associationMappings as $assoc) {
+                if (
+                    ($assoc['type'] & ClassMetadata::TO_ONE) === 0
+                    || false === $assoc['isOwningSide']
+                    || !isset($assoc['targetToSourceKeyColumns'])
+                ) {
+                    continue;
+                }
 
-            /** @phpstan-var literal-string $sourceCol */
-            foreach ($assoc['targetToSourceKeyColumns'] as $sourceCol) {
-                $columnList[] = $sourceCol;
-                $columnMap[$sourceCol] = $this->getSQLResultCasing($this->platform, $sourceCol);
+                foreach ($assoc['targetToSourceKeyColumns'] as $sourceCol) {
+                    $columnList[] = $sourceCol;
+                    $columnMap[$sourceCol] = $this->getSQLResultCasing($this->platform, $sourceCol);
+                }
             }
         }
 
         $values = array_values($id);
 
-        $query =
-            'SELECT '.implode(', ', $columnList)
-            .' FROM '.$tableName.' e'
-            .' WHERE '.$whereSQL
-            .' ORDER BY e.'.$this->config->getRevisionFieldName().' DESC';
+        $query = sprintf(
+            'SELECT %s FROM %s e WHERE %s ORDER BY e.%s DESC',
+            implode(', ', $columnList),
+            $tableName,
+            $whereSQL,
+            $this->config->getRevisionFieldName()
+        );
 
         $stmt = $this->em->getConnection()->executeQuery($query, $values);
 
@@ -891,6 +891,10 @@ class AuditReader
                 \assert(null !== $reflField);
                 $reflField->setValue($entity, $value);
             }
+        }
+
+        if ($this->config->areAssociationsDisabled()) {
+            return $entity;
         }
 
         foreach ($classMetadata->associationMappings as $field => $assoc) {
