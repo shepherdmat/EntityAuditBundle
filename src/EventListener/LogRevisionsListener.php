@@ -464,7 +464,8 @@ class LogRevisionsListener implements EventSubscriber
      */
     private function getInsertJoinTableRevisionSQL(ClassMetadata $class, ClassMetadata $targetClass, array $assoc): string
     {
-        $cacheKey = $class->name.'.'.$targetClass->name;
+        $cacheKey = $class->name.'.'.$targetClass->name.'.'.$assoc['joinTable']['name'];
+
         if (!isset($this->insertJoinTableRevisionSQL[$cacheKey])
             && isset($assoc['relationToSourceKeyColumns'], $assoc['relationToTargetKeyColumns'], $assoc['joinTable']['name'])) {
             $placeholders = ['?', '?'];
